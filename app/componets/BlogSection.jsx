@@ -215,7 +215,7 @@ export default function BlogSection() {
                   {/* READ MORE */}
 
                   <Link
-                    href={`/blogs/${post.slug}`}
+                    href={`/blog/${post.slug}`}
                     className="block mt-4 text-center bg-green-50 hover:bg-green-100 text-green-700 py-2.5 rounded-xl font-semibold transition"
                   >
                     বিস্তারিত পড়ুন →

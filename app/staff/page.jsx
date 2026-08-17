@@ -12,21 +12,21 @@ export default function StaffPage() {
       role: "Founder & Managing Director",
       name: "Mohammad Farhad Uddin",
       desc: "স্ট্যাম্প, কোর্ট ফি, ডকুমেন্টেশন ও eStampBD.com-এর সার্বিক ব্যবস্থাপনা।",
-      image: "/staff/founder.jpg",
+      image: "/staff/admin.jpg",
     },
     {
       id: 2,
       role: "Income Tax Return Specialist",
-      name: "আপনার ভাইয়ের নাম",
+      name: "Mohammad Emdad",
       desc: "আয়কর রিটার্ন ফর্ম পূরণ, রিটার্ন প্রস্তুত এবং আয়কর সংক্রান্ত প্রয়োজনীয় সহায়তা।",
       image: "/staff/tax.jpg",
     },
     {
       id: 3,
       role: "Stamp & Documentation Specialist",
-      name: "তৃতীয় সদস্যের নাম",
-      desc: "স্ট্যাম্প, কোর্ট ফি, প্রয়োজনীয় ডকুমেন্ট ও ড্রাফটিং সংক্রান্ত সেবা।",
-      image: "/staff/document.jpg",
+      name: "Shirin Sharmin",
+      desc: "স্ট্যাম্প, কোর্ট ফি, প্রয়োজনীয় ডকুমেন্ট ও ড্রাফটিং সংক্রান্ত সেবা।",
+      image: "/staff/documentation.jpg",
     },
   ];
 
