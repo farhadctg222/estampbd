@@ -216,74 +216,80 @@ export default function Checkout() {
     setLoading(true);
 
     try {
-      const res = await fetch("/api/orders", {
-        method: "POST",
+  const res = await fetch("/api/orders", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      name: form.name,
+      phone: form.phone,
+      address: form.address,
+      delivery_note: form.delivery_note,
 
-        headers: {
-          "Content-Type": "application/json",
-        },
+      payment_method: form.payment_method,
 
-        body: JSON.stringify({
-          name: form.name,
-          phone: form.phone,
-          address: form.address,
-          delivery_note: form.delivery_note,
+      payment_number:
+        form.payment_method === "cash"
+          ? null
+          : form.payment_number,
 
-          payment_method:
-            form.payment_method,
+      transaction_id:
+        form.payment_method === "cash"
+          ? null
+          : form.transaction_id,
 
-          payment_number:
-            form.payment_method === "cash"
-              ? null
-              : form.payment_number,
+      items: cart,
 
-          transaction_id:
-            form.payment_method === "cash"
-              ? null
-              : form.transaction_id,
+      subtotal,
+      packaging_charge: PACKAGING_CHARGE,
+      delivery_charge: DELIVERY_CHARGE,
+      total,
 
-          items: cart,
+      is_stamp_order: isStampOrder,
+    }),
+  });
 
-          subtotal,
-          packaging_charge: PACKAGING_CHARGE,
-          delivery_charge: DELIVERY_CHARGE,
-          total,
+  const text = await res.text();
 
-          is_stamp_order: isStampOrder,
-        }),
-      });
+  let data;
 
-      const data = await res.json();
+  try {
+    data = JSON.parse(text);
+  } catch {
+    data = {
+      error: text || "Server returned invalid response",
+    };
+  }
 
-      if (!res.ok) {
-        alert(
-          data.error ||
-            "Order failed!"
-        );
+  console.log("ORDER API STATUS:", res.status);
+  console.log("ORDER API RESPONSE:", data);
 
-        return;
-      }
+  if (!res.ok) {
+    alert(
+      data?.error ||
+      data?.message ||
+      `Order failed! Status: ${res.status}`
+    );
+    return;
+  }
 
-      // =========================
-      // SUCCESS
-      // =========================
+  setOrderId(data.insertId);
 
-      setOrderId(data.insertId);
+  clearCart();
 
-      clearCart();
+  setShowModal(true);
 
-      setShowModal(true);
+} catch (error) {
+  console.error("ORDER SUBMIT ERROR:", error);
 
-    } catch (error) {
-      console.error(error);
-
-      alert(
-        "Server error!"
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
+  alert(
+    error?.message ||
+    "Server error! আবার চেষ্টা করুন।"
+  );
+} finally {
+  setLoading(false);
+}
 
   return (
     <main className="min-h-screen bg-slate-50 px-4 py-8">
@@ -896,4 +902,5 @@ export default function Checkout() {
 
     </main>
   );
+}
 }

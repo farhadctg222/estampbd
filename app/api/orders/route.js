@@ -1,164 +1,446 @@
-
 import { verifyToken } from "@/app/lib/auth";
 import database from "../../lib/db";
 
 
+// =====================================================
+// POST - CREATE ORDER
+// =====================================================
 
 export async function POST(req) {
-  const body = await req.json();
-
-  const {
-  name,
-  phone,
-  address,
-  package_id,
-  area_id,
-  quantity,
-  total,
-  items,
-  payment_method,
-  payment_number,
-  transaction_id
-} = body;
-// ✅ Only bKash and Nagad allowed
-if (!["bkash", "nagad"].includes(payment_method)) {
-  return Response.json(
-    { error: "Only bKash and Nagad payment allowed" },
-    { status: 400 }
-  );
-}
-
-// ✅ Payment info required
-if (!payment_number || !transaction_id) {
-  return Response.json(
-    { error: "Payment number and transaction ID required" },
-    { status: 400 }
-  );
-}
-  // ✅ Case 1: Cart Order (multiple items)
-  if (items && items.length > 0) {
-    if (!name || !phone) {
-      return Response.json({ error: "Missing fields" }, { status: 400 });
-    }
-
-    try {
-      // 🔥 main order insert
-      const [orderResult] = await database.execute(
-  `INSERT INTO orders 
-  (
-    customer_name,
-    phone,
-    address,
-    delivery_note,
-    payment_method,
-    payment_number,
-    transaction_id,
-    total_price
-  ) 
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-  [
-    name,
-    phone,
-    address || null,
-    body.delivery_note || null,
-    payment_method,
-    payment_number || null,
-    transaction_id || null,
-    Number(total || 0)
-  ]
-);
-      const orderId = orderResult.insertId;
-
-      // 🔥 insert each item
-      for (const item of items) {
-        await database.execute(
-          `INSERT INTO order_items (order_id, package_id, quantity, price) 
-           VALUES (?, ?, ?, ?)`,
-          [
-            orderId,
-            Number(item.id),
-             Number(item.quantity || 1),
-            Number(item.price)
-          ]
-        );
-      }
-
-      return Response.json({ success: true, insertId: orderId });
-
-    } catch (err) {
-      console.error(err);
-      return Response.json({ error: "Server error" }, { status: 500 });
-    }
-  }
-
-  // ✅ Case 2: Old Single Order (your existing system)
-  if (!name || !phone || !package_id || !area_id) {
-    return Response.json({ error: "Missing fields" }, { status: 400 });
-  }
-
   try {
-    const [result] = await database.execute(
-      `INSERT INTO orders 
-      (customer_name, phone, address, package_id, area_id, quantity, total_price) 
-      VALUES (?, ?, ?, ?, ?, ?, ?)`,
-            [
+    const body = await req.json();
+
+    const {
       name,
       phone,
-      address || null,
-      Number(package_id),
-      Number(area_id),
-      Number(quantity || 1),
+      address,
+      delivery_note,
+
+      package_id,
+      area_id,
+      quantity,
+
+      total,
+      subtotal,
+      packaging_charge,
+      delivery_charge,
+
+      items,
+
       payment_method,
       payment_number,
       transaction_id,
-      Number(total || 0)
-      ]
-    );
 
-    return Response.json({ success: true, insertId: result.insertId });
+      is_stamp_order,
+    } = body;
+
+
+    // =====================================================
+    // BASIC VALIDATION
+    // =====================================================
+
+    if (!name || !phone) {
+      return Response.json(
+        {
+          error: "Name and phone are required",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+
+    // =====================================================
+    // PAYMENT VALIDATION
+    // =====================================================
+
+    if (!["cash", "bkash", "nagad"].includes(payment_method)) {
+      return Response.json(
+        {
+          error: "Please select a valid payment method",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+
+    // =====================================================
+    // STAMP ORDER
+    // Cash NOT allowed
+    // =====================================================
+
+    if (is_stamp_order && payment_method === "cash") {
+      return Response.json(
+        {
+          error:
+            "Stamp Paper / Stamp Entry orders require advance payment by bKash or Nagad.",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+
+    // =====================================================
+    // ONLINE PAYMENT
+    // =====================================================
+
+    if (
+      payment_method === "bkash" ||
+      payment_method === "nagad"
+    ) {
+      if (!payment_number || !transaction_id) {
+        return Response.json(
+          {
+            error:
+              "Payment number and transaction ID are required",
+          },
+          {
+            status: 400,
+          }
+        );
+      }
+    }
+
+
+    // =====================================================
+    // CART ORDER
+    // =====================================================
+
+    if (Array.isArray(items) && items.length > 0) {
+
+      const connection = await database.getConnection();
+
+      try {
+
+        await connection.beginTransaction();
+
+
+        // =====================================================
+        // INSERT ORDER
+        // =====================================================
+
+        const [orderResult] = await connection.execute(
+          `
+          INSERT INTO orders
+          (
+            customer_name,
+            phone,
+            address,
+            delivery_note,
+            payment_method,
+            payment_number,
+            transaction_id,
+            total_price
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          `,
+          [
+            name,
+            phone,
+            address || null,
+            delivery_note || null,
+
+            payment_method,
+
+            payment_method === "cash"
+              ? null
+              : payment_number,
+
+            payment_method === "cash"
+              ? null
+              : transaction_id,
+
+            Number(total || 0),
+          ]
+        );
+
+
+        const orderId = orderResult.insertId;
+
+
+        // =====================================================
+        // INSERT ORDER ITEMS
+        // =====================================================
+
+        for (const item of items) {
+
+          if (!item.id) {
+            throw new Error(
+              `Product ID missing for item: ${item.name || "Unknown"}`
+            );
+          }
+
+          await connection.execute(
+            `
+            INSERT INTO order_items
+            (
+              order_id,
+              package_id,
+              quantity,
+              price
+            )
+            VALUES (?, ?, ?, ?)
+            `,
+            [
+              orderId,
+              Number(item.id),
+              Number(item.quantity || 1),
+              Number(item.price || 0),
+            ]
+          );
+        }
+
+
+        // =====================================================
+        // SUCCESS
+        // =====================================================
+
+        await connection.commit();
+
+        return Response.json(
+          {
+            success: true,
+            insertId: orderId,
+            message: "Order placed successfully",
+          },
+          {
+            status: 201,
+          }
+        );
+
+      } catch (err) {
+
+        await connection.rollback();
+
+        console.error(
+          "CART ORDER DATABASE ERROR:",
+          err
+        );
+
+        return Response.json(
+          {
+            error: "Order could not be created",
+            details: err.message,
+          },
+          {
+            status: 500,
+          }
+        );
+
+      } finally {
+
+        connection.release();
+
+      }
+    }
+
+
+    // =====================================================
+    // OLD SINGLE PACKAGE ORDER
+    // =====================================================
+
+    if (!package_id || !area_id) {
+
+      return Response.json(
+        {
+          error:
+            "Cart is empty or package/area information is missing",
+        },
+        {
+          status: 400,
+        }
+      );
+
+    }
+
+
+    // =====================================================
+    // SINGLE ORDER INSERT
+    // =====================================================
+
+    try {
+
+      const [result] = await database.execute(
+        `
+        INSERT INTO orders
+        (
+          customer_name,
+          phone,
+          address,
+          package_id,
+          area_id,
+          quantity,
+          total_price,
+          payment_method,
+          payment_number,
+          transaction_id
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+        [
+          name,
+          phone,
+          address || null,
+
+          Number(package_id),
+          Number(area_id),
+          Number(quantity || 1),
+
+          Number(total || 0),
+
+          payment_method,
+
+          payment_method === "cash"
+            ? null
+            : payment_number,
+
+          payment_method === "cash"
+            ? null
+            : transaction_id,
+        ]
+      );
+
+
+      return Response.json(
+        {
+          success: true,
+          insertId: result.insertId,
+        },
+        {
+          status: 201,
+        }
+      );
+
+    } catch (err) {
+
+      console.error(
+        "SINGLE ORDER DATABASE ERROR:",
+        err
+      );
+
+      return Response.json(
+        {
+          error: "Order could not be created",
+          details: err.message,
+        },
+        {
+          status: 500,
+        }
+      );
+    }
 
   } catch (err) {
-    console.error(err);
-    return Response.json({ error: "Server error" }, { status: 500 });
+
+    console.error(
+      "ORDER API ERROR:",
+      err
+    );
+
+    return Response.json(
+      {
+        error: "Invalid request",
+        details: err.message,
+      },
+      {
+        status: 500,
+      }
+    );
   }
 }
 
 
-
+// =====================================================
+// GET - ADMIN ORDERS
+// =====================================================
 
 export async function GET(req) {
+
   try {
-    const token = req.headers.get("authorization");
 
-    const cleanToken = token?.replace("Bearer ", "");
+    const token =
+      req.headers.get("authorization");
 
-    if (!cleanToken || !verifyToken(cleanToken)) {
-      return Response.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const cleanToken =
+      token?.replace("Bearer ", "");
 
-    const [orders] = await database.execute(`
-      SELECT orders.*, areas.name as area_name
-      FROM orders
-      LEFT JOIN areas ON orders.area_id = areas.id
-      ORDER BY orders.id DESC
-    `);
+    if (
+      !cleanToken ||
+      !verifyToken(cleanToken)
+    ) {
 
-    // items attach
-    for (let order of orders) {
-      const [items] = await database.execute(
-        `SELECT order_items.*, packages.name
-         FROM order_items
-         JOIN packages ON order_items.package_id = packages.id
-         WHERE order_items.order_id = ?`,
-        [order.id]
+      return Response.json(
+        {
+          error: "Unauthorized",
+        },
+        {
+          status: 401,
+        }
       );
 
-      order.items = items;
     }
 
-    return Response.json(orders || []);
+
+    const [orders] =
+      await database.execute(`
+        SELECT
+          orders.*,
+          areas.name AS area_name
+        FROM orders
+        LEFT JOIN areas
+          ON orders.area_id = areas.id
+        ORDER BY orders.id DESC
+      `);
+
+
+    // =====================================================
+    // ATTACH ITEMS
+    // =====================================================
+
+    for (const order of orders) {
+
+      const [items] =
+        await database.execute(
+          `
+          SELECT
+            order_items.*,
+            packages.name
+          FROM order_items
+          JOIN packages
+            ON order_items.package_id = packages.id
+          WHERE order_items.order_id = ?
+          `,
+          [order.id]
+        );
+
+      order.items = items;
+
+    }
+
+
+    return Response.json(
+      orders || []
+    );
+
   } catch (err) {
-    console.error(err);
-    return Response.json({ error: "Server error" }, { status: 500 });
+
+    console.error(
+      "GET ORDERS ERROR:",
+      err
+    );
+
+    return Response.json(
+      {
+        error: "Server error",
+        details: err.message,
+      },
+      {
+        status: 500,
+      }
+    );
   }
 }
