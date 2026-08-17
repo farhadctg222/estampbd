@@ -4,7 +4,7 @@ import "./globals.css";
 import Navbar from "./componets/Navbar";
 import Footer from "./componets/Footer";
 import CartProvider from "./context/CartContext";
-import SplashScreen from "./componets/SplashScreen";
+// import SplashScreen from "./componets/SplashScreen";
 
 export const metadata: Metadata = {
   title: "eStampBD.com - Stamp, Court Fee & Legal Services",
@@ -33,7 +33,7 @@ export default function RootLayout({
       <body className="bg-gray-50 text-gray-800">
 
         <CartProvider>
-          <SplashScreen>
+          {/* <SplashScreen> */}
             <Navbar />
 
             <main className="pt-16">
@@ -41,7 +41,7 @@ export default function RootLayout({
             </main>
 
           </SplashScreen>
-        </CartProvider>
+        {/* </CartProvider> */}
 
         <Footer />
 
