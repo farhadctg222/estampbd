@@ -1,9 +1,11 @@
-import { verifyToken } from "@/app/lib/auth";
-import database from "@/app/lib/db";
 
 // =====================================================
 // POST - CREATE ORDER
 // =====================================================
+
+import database from "@/app/lib/db";
+import { verifyToken } from "../../auth";
+
 
 export async function POST(req) {
   try {
