@@ -1,159 +1,378 @@
-
-// app/api/orders/[id]/route.js
-
 import { verifyToken } from "@/app/lib/auth";
-import database from "@/app/lib/db";
+import database from "../../lib/db";
 
+// =====================================================
+// POST - CREATE ORDER
+// =====================================================
 
-// ======================
-// PUT - UPDATE STATUS
-// ======================
-export async function PUT(req, context) {
+export async function POST(req) {
   try {
-    const raw = req.headers.get("authorization");
-
-    const token = raw?.startsWith("Bearer ")
-      ? raw.replace("Bearer ", "")
-      : raw;
-
-    if (!token || !verifyToken(token)) {
-      return Response.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const { id } = await context.params;
-
-    // 🔥 👉 এইখানে বসবে তোমার code
     const body = await req.json();
 
-    
+    const {
+      name,
+      phone,
+      address,
+      delivery_note,
 
-// ✅ status update
-// ✅ status update + payment update
-if (body.status || body.payment_status) {
-  await database.execute(
-    `UPDATE orders
-     SET
-       status = COALESCE(?, status),
-       payment_status = COALESCE(?, payment_status)
-     WHERE id=?`,
-    [
-      body.status ?? null,
-      body.payment_status ?? null,
-      id,
-    ]
-  );
-}
+      package_id,
+      area_id,
+      quantity,
 
-// ✅ edit (name + phone + address)
-if (
-  body.name !== undefined ||
-  body.phone !== undefined ||
-  body.address !== undefined
-) {
-  await database.execute(
-    "UPDATE orders SET customer_name=?, phone=?, address=? WHERE id=?",
-    [
-      body.name,
-      body.phone,
-      body.address,
-      id
-    ]
-  );
-}
+      total,
+      subtotal,
+      packaging_charge,
+      delivery_charge,
 
-    return Response.json({ success: true });
+      items,
 
-  } catch (err) {
-    console.error(err);
-    return Response.json({ error: "Server error" }, { status: 500 });
-  }
-}
+      payment_method,
+      payment_number,
+      transaction_id,
 
+      // শুধু তথ্য হিসেবে আসতে পারে
+      // কোনো payment restriction হবে না
+      is_stamp_order,
+    } = body;
 
-// ======================
-// DELETE ORDER
-// ======================
-export async function DELETE(req, context) {
-  try {
-    const token = req.headers.get("authorization")?.replace("Bearer ", "");
+    // =====================================================
+    // BASIC VALIDATION
+    // =====================================================
 
-    if (!token || !verifyToken(token)) {
-      return Response.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const params = await context.params; // 🔥 SAFE FIX
-    const id = Number(params.id);
-
-    if (!id) {
-      return Response.json({ error: "Invalid ID" }, { status: 400 });
-    }
-
-    await database.execute(
-      "DELETE FROM orders WHERE id=?",
-      [id]
-    );
-
-    return Response.json({
-      success: true,
-      message: "Order deleted",
-    });
-
-  } catch (err) {
-    console.error("DELETE ERROR:", err);
-    return Response.json({ error: "Server error" }, { status: 500 });
-  }
-}
-
-
-// export async function GET(req, { params }) {
-//   const { id } = params; // ✅ FIXED
-
-//   console.log("Fetching package with ID:", id);
-
-//   const [rows] = await db.execute(
-//     "SELECT id, name, price FROM packages WHERE id=?",
-//     [id]
-//   );
-
-//   console.log("DB RESULT:", rows); // ✅ debug
-
-//   return Response.json(rows[0] || {});
-// }
-
-
-
-export async function GET(req, { params }) {
-  const { id } = await params;
-
-  if (!id) {
-    return new Response(
-      JSON.stringify({ error: "Order ID missing" }),
-      { status: 400 }
-    );
-  }
-
-  try {
-    const [rows] = await database.execute(
-      `SELECT id, customer_name, total_price, status, payment_status, phone, quantity, address, delivery_note, created_at
-FROM orders WHERE id=?`,
-      [id]
-    );
-
-    if (rows.length === 0) {
-      return new Response(
-        JSON.stringify({ error: "Order not found" }),
-        { status: 404 }
+    if (!name || !phone) {
+      return Response.json(
+        {
+          error: "Name and phone are required",
+        },
+        { status: 400 }
       );
     }
 
-    return new Response(JSON.stringify(rows[0]), { status: 200 });
+    // =====================================================
+    // PAYMENT METHOD
+    // =====================================================
+
+    if (!["cash", "bkash", "nagad"].includes(payment_method)) {
+      return Response.json(
+        {
+          error:
+            "Please select Cash on Delivery, bKash or Nagad",
+        },
+        { status: 400 }
+      );
+    }
+
+    // =====================================================
+    // ONLINE PAYMENT VALIDATION
+    // শুধুমাত্র bKash / Nagad হলে লাগবে
+    // =====================================================
+
+    if (
+      payment_method === "bkash" ||
+      payment_method === "nagad"
+    ) {
+      if (!payment_number) {
+        return Response.json(
+          {
+            error: "Payment number is required",
+          },
+          { status: 400 }
+        );
+      }
+
+      if (!transaction_id) {
+        return Response.json(
+          {
+            error: "Transaction ID is required",
+          },
+          { status: 400 }
+        );
+      }
+    }
+
+    // =====================================================
+    // CART ORDER
+    // =====================================================
+
+    if (Array.isArray(items) && items.length > 0) {
+      const connection = await database.getConnection();
+
+      try {
+        await connection.beginTransaction();
+
+        // =================================================
+        // INSERT ORDER
+        // =================================================
+
+        const [orderResult] = await connection.execute(
+          `
+          INSERT INTO orders
+          (
+            customer_name,
+            phone,
+            address,
+            delivery_note,
+            payment_method,
+            payment_number,
+            transaction_id,
+            total_price
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          `,
+          [
+            name,
+            phone,
+            address || null,
+            delivery_note || null,
+
+            payment_method,
+
+            // Cash হলে null
+            payment_method === "cash"
+              ? null
+              : payment_number,
+
+            // Cash হলে null
+            payment_method === "cash"
+              ? null
+              : transaction_id,
+
+            Number(total || 0),
+          ]
+        );
+
+        const orderId = orderResult.insertId;
+
+        // =================================================
+        // INSERT ORDER ITEMS
+        // =================================================
+
+        for (const item of items) {
+          if (!item.id) {
+            throw new Error(
+              `Product ID missing for item: ${
+                item.name || "Unknown"
+              }`
+            );
+          }
+
+          await connection.execute(
+            `
+            INSERT INTO order_items
+            (
+              order_id,
+              package_id,
+              quantity,
+              price
+            )
+            VALUES (?, ?, ?, ?)
+            `,
+            [
+              orderId,
+              Number(item.id),
+              Number(item.quantity || 1),
+              Number(item.price || 0),
+            ]
+          );
+        }
+
+        // =================================================
+        // COMMIT
+        // =================================================
+
+        await connection.commit();
+
+        return Response.json(
+          {
+            success: true,
+            insertId: orderId,
+            message: "Order placed successfully",
+          },
+          { status: 201 }
+        );
+      } catch (err) {
+        await connection.rollback();
+
+        console.error(
+          "CART ORDER DATABASE ERROR:",
+          err
+        );
+
+        return Response.json(
+          {
+            error: "Order could not be created",
+            details: err.message,
+          },
+          { status: 500 }
+        );
+      } finally {
+        connection.release();
+      }
+    }
+
+    // =====================================================
+    // OLD SINGLE PACKAGE ORDER
+    // =====================================================
+
+    if (!package_id || !area_id) {
+      return Response.json(
+        {
+          error:
+            "Cart is empty or package/area information is missing",
+        },
+        { status: 400 }
+      );
+    }
+
+    // =====================================================
+    // SINGLE ORDER INSERT
+    // =====================================================
+
+    try {
+      const [result] = await database.execute(
+        `
+        INSERT INTO orders
+        (
+          customer_name,
+          phone,
+          address,
+          package_id,
+          area_id,
+          quantity,
+          total_price,
+          payment_method,
+          payment_number,
+          transaction_id
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+        [
+          name,
+          phone,
+          address || null,
+
+          Number(package_id),
+          Number(area_id),
+          Number(quantity || 1),
+
+          Number(total || 0),
+
+          payment_method,
+
+          payment_method === "cash"
+            ? null
+            : payment_number,
+
+          payment_method === "cash"
+            ? null
+            : transaction_id,
+        ]
+      );
+
+      return Response.json(
+        {
+          success: true,
+          insertId: result.insertId,
+          message: "Order placed successfully",
+        },
+        { status: 201 }
+      );
+    } catch (err) {
+      console.error(
+        "SINGLE ORDER DATABASE ERROR:",
+        err
+      );
+
+      return Response.json(
+        {
+          error: "Order could not be created",
+          details: err.message,
+        },
+        { status: 500 }
+      );
+    }
   } catch (err) {
-    console.error("DB Error:", err);
-    return new Response(
-      JSON.stringify({ error: "Server error" }),
+    console.error("ORDER API ERROR:", err);
+
+    return Response.json(
+      {
+        error: "Invalid request",
+        details: err.message,
+      },
       { status: 500 }
     );
   }
 }
 
 
+// =====================================================
+// GET - ADMIN ORDERS
+// =====================================================
+
+export async function GET(req) {
+  try {
+    const token =
+      req.headers.get("authorization");
+
+    const cleanToken =
+      token?.replace("Bearer ", "");
+
+    if (
+      !cleanToken ||
+      !verifyToken(cleanToken)
+    ) {
+      return Response.json(
+        {
+          error: "Unauthorized",
+        },
+        { status: 401 }
+      );
+    }
+
+    const [orders] =
+      await database.execute(`
+        SELECT
+          orders.*,
+          areas.name AS area_name
+        FROM orders
+        LEFT JOIN areas
+          ON orders.area_id = areas.id
+        ORDER BY orders.id DESC
+      `);
+
+    // =================================================
+    // ATTACH ITEMS
+    // =================================================
+
+    for (const order of orders) {
+      const [items] =
+        await database.execute(
+          `
+          SELECT
+            order_items.*,
+            packages.name
+          FROM order_items
+          JOIN packages
+            ON order_items.package_id =
+               packages.id
+          WHERE order_items.order_id = ?
+          `,
+          [order.id]
+        );
+
+      order.items = items;
+    }
+
+    return Response.json(orders || []);
+  } catch (err) {
+    console.error("GET ORDERS ERROR:", err);
+
+    return Response.json(
+      {
+        error: "Server error",
+        details: err.message,
+      },
+      { status: 500 }
+    );
+  }
+}
