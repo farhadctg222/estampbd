@@ -1,5 +1,7 @@
+// app/api/orders/[id]/route.js
+
 import { verifyToken } from "@/app/lib/auth";
-import database from "../../lib/db";
+import database from "@/app/lib/db";
 
 // =====================================================
 // POST - CREATE ORDER
