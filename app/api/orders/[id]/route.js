@@ -1,7 +1,7 @@
 // app/api/orders/[id]/route.js
 
-import database from "../../../lib/db";
-import { verifyToken } from "../../auth";
+import { verifyToken } from "@/app/lib/auth";
+import database from "@/app/lib/db";
 
 
 

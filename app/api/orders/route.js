@@ -3,8 +3,8 @@
 // POST - CREATE ORDER
 // =====================================================
 
+import { verifyToken } from "@/app/lib/auth";
 import database from "@/app/lib/db";
-import { verifyToken } from "../../auth";
 
 
 export async function POST(req) {
