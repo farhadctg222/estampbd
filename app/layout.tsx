@@ -40,8 +40,8 @@ export default function RootLayout({
               {children}
             </main>
 
-          </SplashScreen>
-        {/* </CartProvider> */}
+          {/* </SplashScreen> */}
+        </CartProvider>
 
         <Footer />
 

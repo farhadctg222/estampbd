@@ -20,18 +20,12 @@ export async function POST(req) {
       quantity,
 
       total,
-      subtotal,
-      packaging_charge,
-      delivery_charge,
-
       items,
 
       payment_method,
       payment_number,
       transaction_id,
 
-      // শুধু তথ্য হিসেবে আসতে পারে
-      // কোনো payment restriction হবে না
       is_stamp_order,
     } = body;
 
@@ -50,6 +44,7 @@ export async function POST(req) {
 
     // =====================================================
     // PAYMENT METHOD
+    // Cash / bKash / Nagad
     // =====================================================
 
     if (!["cash", "bkash", "nagad"].includes(payment_method)) {
@@ -64,7 +59,7 @@ export async function POST(req) {
 
     // =====================================================
     // ONLINE PAYMENT VALIDATION
-    // শুধুমাত্র bKash / Nagad হলে লাগবে
+    // Only bKash / Nagad
     // =====================================================
 
     if (
@@ -95,16 +90,12 @@ export async function POST(req) {
     // =====================================================
 
     if (Array.isArray(items) && items.length > 0) {
-      const connection = await database.getConnection();
-
       try {
-        await connection.beginTransaction();
+        // ===============================================
+        // CREATE ORDER
+        // ===============================================
 
-        // =================================================
-        // INSERT ORDER
-        // =================================================
-
-        const [orderResult] = await connection.execute(
+        const [orderResult] = await database.execute(
           `
           INSERT INTO orders
           (
@@ -127,12 +118,12 @@ export async function POST(req) {
 
             payment_method,
 
-            // Cash হলে null
+            // Cash হলে payment number লাগবে না
             payment_method === "cash"
               ? null
               : payment_number,
 
-            // Cash হলে null
+            // Cash হলে transaction ID লাগবে না
             payment_method === "cash"
               ? null
               : transaction_id,
@@ -143,20 +134,20 @@ export async function POST(req) {
 
         const orderId = orderResult.insertId;
 
-        // =================================================
+        // ===============================================
         // INSERT ORDER ITEMS
-        // =================================================
+        // ===============================================
 
         for (const item of items) {
           if (!item.id) {
             throw new Error(
-              `Product ID missing for item: ${
-                item.name || "Unknown"
+              `Product ID missing: ${
+                item.name || "Unknown Product"
               }`
             );
           }
 
-          await connection.execute(
+          await database.execute(
             `
             INSERT INTO order_items
             (
@@ -176,11 +167,9 @@ export async function POST(req) {
           );
         }
 
-        // =================================================
-        // COMMIT
-        // =================================================
-
-        await connection.commit();
+        // ===============================================
+        // SUCCESS
+        // ===============================================
 
         return Response.json(
           {
@@ -191,8 +180,6 @@ export async function POST(req) {
           { status: 201 }
         );
       } catch (err) {
-        await connection.rollback();
-
         console.error(
           "CART ORDER DATABASE ERROR:",
           err
@@ -205,8 +192,6 @@ export async function POST(req) {
           },
           { status: 500 }
         );
-      } finally {
-        connection.release();
       }
     }
 
@@ -292,7 +277,10 @@ export async function POST(req) {
       );
     }
   } catch (err) {
-    console.error("ORDER API ERROR:", err);
+    console.error(
+      "ORDER API ERROR:",
+      err
+    );
 
     return Response.json(
       {
@@ -303,7 +291,6 @@ export async function POST(req) {
     );
   }
 }
-
 
 // =====================================================
 // GET - ADMIN ORDERS
@@ -317,6 +304,10 @@ export async function GET(req) {
     const cleanToken =
       token?.replace("Bearer ", "");
 
+    // ===============================================
+    // AUTHENTICATION
+    // ===============================================
+
     if (
       !cleanToken ||
       !verifyToken(cleanToken)
@@ -329,8 +320,13 @@ export async function GET(req) {
       );
     }
 
+    // ===============================================
+    // GET ORDERS
+    // ===============================================
+
     const [orders] =
-      await database.execute(`
+      await database.execute(
+        `
         SELECT
           orders.*,
           areas.name AS area_name
@@ -338,11 +334,12 @@ export async function GET(req) {
         LEFT JOIN areas
           ON orders.area_id = areas.id
         ORDER BY orders.id DESC
-      `);
+        `
+      );
 
-    // =================================================
-    // ATTACH ITEMS
-    // =================================================
+    // ===============================================
+    // ATTACH ORDER ITEMS
+    // ===============================================
 
     for (const order of orders) {
       const [items] =
@@ -353,8 +350,7 @@ export async function GET(req) {
             packages.name
           FROM order_items
           JOIN packages
-            ON order_items.package_id =
-               packages.id
+            ON order_items.package_id = packages.id
           WHERE order_items.order_id = ?
           `,
           [order.id]
@@ -363,9 +359,16 @@ export async function GET(req) {
       order.items = items;
     }
 
+    // ===============================================
+    // RESPONSE
+    // ===============================================
+
     return Response.json(orders || []);
   } catch (err) {
-    console.error("GET ORDERS ERROR:", err);
+    console.error(
+      "GET ORDERS ERROR:",
+      err
+    );
 
     return Response.json(
       {
